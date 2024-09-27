@@ -10,6 +10,22 @@ use viking::elf;
 use viking::functions;
 use viking::repo;
 use viking::ui;
+//use serde_json::json;
+use reqwest;
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FunctionInfo {
+    name: String,
+    addr: u64,
+    size: usize,
+}
+
+// Assuming CreateScratchResponse is defined somewhere
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateScratchResponse {
+    url: String,
+}
 
 #[derive(FromArgs)]
 /// Upload a function to decomp.me.
@@ -20,6 +36,7 @@ struct Args {
 
     /// decomp.me API endpoint base
     #[argh(option, default = r#""https://decomp.me".to_string()"#)]
+    //#[argh(option, default = r#""http://localhost:8000/".to_string()"#)]
     decomp_me_api: String,
 
     /// path to compilation database
@@ -220,6 +237,19 @@ fn create_scratch(
 ) -> Result<String> {
     let client = reqwest::blocking::Client::new();
 
+    /*let payload = json!({
+        "function_name": info.name,
+        "address": info.addr,
+        "size": info.size,
+        "source_code": source_code,
+        "disassembly": disassembly,
+        "context": context,
+        "compile_flags": flags,
+        "target": args.version.as_deref().unwrap_or("unknown"),
+    }); */
+
+    //println!("Payload:\n{}", serde_json::to_string_pretty(&payload)?);
+
     #[derive(serde::Serialize)]
     struct Data {
         compiler: String,
@@ -358,7 +388,9 @@ fn main() -> Result<()> {
     let decomp_elf = elf::load_decomp_elf(version)?;
     let orig_elf = elf::load_orig_elf(version)?;
     let function = elf::get_function(&orig_elf, function_info.addr, function_info.size as u64)?;
-    let disassembly = get_disassembly(function_info, &function)?;
+    let disassembly = get_disassembly(&function_info, &function)?;
+
+    //println!("Disassembly:\n{}", disassembly);
 
     let source_code = format!(
         "// function name: {}\n\
@@ -372,8 +404,6 @@ fn main() -> Result<()> {
     let mut flags = decomp_me_config.default_compile_flags.clone();
     let mut context = "".to_string();
 
-    // Fill in compile flags and the context using the compilation database
-    // and the specified source file.
     let source_file = args
         .source_file
         .clone()
@@ -392,9 +422,7 @@ fn main() -> Result<()> {
 
         let mut command = tu.command.clone();
         remove_c_and_output_flags(&mut command);
-        // Remove the compiler command name.
         command.remove(0);
-        // Remove the sysroot parameter, include dirs and source file path.
         command.retain(|arg| {
             if arg.starts_with("--sysroot=") {
                 return false;
@@ -431,7 +459,7 @@ fn main() -> Result<()> {
     let url = create_scratch(
         &args,
         decomp_me_config,
-        function_info,
+        &function_info,
         &flags,
         &context,
         &source_code,
